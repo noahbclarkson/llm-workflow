@@ -60,3 +60,109 @@ impl WorkflowMetrics {
         self.total_token_count
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_metrics_default() {
+        let metrics = WorkflowMetrics::default();
+        assert_eq!(metrics.prompt_token_count, 0);
+        assert_eq!(metrics.completion_token_count, 0);
+        assert_eq!(metrics.total_token_count, 0);
+        assert_eq!(metrics.steps_completed, 0);
+        assert!(metrics.failures.is_empty());
+        assert!(!metrics.has_failures());
+    }
+
+    #[test]
+    fn test_add_prompt_tokens() {
+        let mut metrics = WorkflowMetrics::default();
+        metrics.add_prompt_tokens(100);
+        assert_eq!(metrics.prompt_token_count, 100);
+        assert_eq!(metrics.total_token_count, 100);
+        assert_eq!(metrics.total_tokens(), 100);
+    }
+
+    #[test]
+    fn test_add_completion_tokens() {
+        let mut metrics = WorkflowMetrics::default();
+        metrics.add_completion_tokens(50);
+        assert_eq!(metrics.completion_token_count, 50);
+        assert_eq!(metrics.total_token_count, 50);
+        assert_eq!(metrics.total_tokens(), 50);
+    }
+
+    #[test]
+    fn test_add_tokens_combined() {
+        let mut metrics = WorkflowMetrics::default();
+        metrics.add_tokens(100, 50);
+        assert_eq!(metrics.prompt_token_count, 100);
+        assert_eq!(metrics.completion_token_count, 50);
+        assert_eq!(metrics.total_token_count, 150);
+        assert_eq!(metrics.total_tokens(), 150);
+    }
+
+    #[test]
+    fn test_record_failure() {
+        let mut metrics = WorkflowMetrics::default();
+        assert!(!metrics.has_failures());
+        
+        metrics.record_failure("Error 1".to_string());
+        assert!(metrics.has_failures());
+        assert_eq!(metrics.failures.len(), 1);
+        
+        metrics.record_failure("Error 2".to_string());
+        assert_eq!(metrics.failures.len(), 2);
+        assert_eq!(metrics.failures[0], "Error 1");
+        assert_eq!(metrics.failures[1], "Error 2");
+    }
+
+    #[test]
+    fn test_record_step() {
+        let mut metrics = WorkflowMetrics::default();
+        assert_eq!(metrics.steps_completed, 0);
+        
+        metrics.record_step();
+        assert_eq!(metrics.steps_completed, 1);
+        
+        metrics.record_step();
+        metrics.record_step();
+        assert_eq!(metrics.steps_completed, 3);
+    }
+
+    #[test]
+    fn test_metrics_accumulation() {
+        let mut metrics = WorkflowMetrics::default();
+        
+        // Simulate multiple LLM calls
+        metrics.add_tokens(100, 50);
+        metrics.record_step();
+        
+        metrics.add_tokens(200, 75);
+        metrics.record_step();
+        
+        assert_eq!(metrics.prompt_token_count, 300);
+        assert_eq!(metrics.completion_token_count, 125);
+        assert_eq!(metrics.total_tokens(), 425);
+        assert_eq!(metrics.steps_completed, 2);
+    }
+
+    #[test]
+    fn test_metrics_serialization() {
+        let mut metrics = WorkflowMetrics::default();
+        metrics.add_tokens(100, 50);
+        metrics.record_step();
+        metrics.record_failure("test error".to_string());
+        
+        let json = serde_json::to_string(&metrics).unwrap();
+        let deserialized: WorkflowMetrics = serde_json::from_str(&json).unwrap();
+        
+        assert_eq!(deserialized.prompt_token_count, 100);
+        assert_eq!(deserialized.completion_token_count, 50);
+        assert_eq!(deserialized.total_token_count, 150);
+        assert_eq!(deserialized.steps_completed, 1);
+        assert_eq!(deserialized.failures.len(), 1);
+    }
+}
