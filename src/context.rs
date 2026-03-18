@@ -162,3 +162,121 @@ impl ExecutionContext {
         self.traces.lock().unwrap().clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::WorkflowEvent;
+
+    #[test]
+    fn test_new_context_is_empty() {
+        let ctx = ExecutionContext::new();
+        let snap = ctx.snapshot();
+        assert_eq!(snap.prompt_token_count, 0);
+        assert_eq!(snap.completion_token_count, 0);
+        assert_eq!(snap.total_token_count, 0);
+        assert_eq!(snap.steps_completed, 0);
+        assert!(ctx.trace_snapshot().is_empty());
+    }
+
+    #[test]
+    fn test_record_prompt_tokens() {
+        let ctx = ExecutionContext::new();
+        ctx.record_prompt_tokens(100);
+        ctx.record_prompt_tokens(50);
+        let snap = ctx.snapshot();
+        assert_eq!(snap.prompt_token_count, 150);
+    }
+
+    #[test]
+    fn test_record_completion_tokens() {
+        let ctx = ExecutionContext::new();
+        ctx.record_completion_tokens(200);
+        let snap = ctx.snapshot();
+        assert_eq!(snap.completion_token_count, 200);
+    }
+
+    #[test]
+    fn test_record_tokens_combined() {
+        let ctx = ExecutionContext::new();
+        ctx.record_tokens(100, 200);
+        let snap = ctx.snapshot();
+        assert_eq!(snap.prompt_token_count, 100);
+        assert_eq!(snap.completion_token_count, 200);
+        assert_eq!(snap.total_token_count, 300);
+    }
+
+    #[test]
+    fn test_record_step() {
+        let ctx = ExecutionContext::new();
+        ctx.record_step();
+        ctx.record_step();
+        ctx.record_step();
+        let snap = ctx.snapshot();
+        assert_eq!(snap.steps_completed, 3);
+    }
+
+    #[test]
+    fn test_record_failure() {
+        let ctx = ExecutionContext::new();
+        ctx.record_failure("something exploded");
+        let snap = ctx.snapshot();
+        assert_eq!(snap.failures.len(), 1);
+        assert_eq!(snap.failures[0], "something exploded");
+    }
+
+    #[test]
+    fn test_emit_and_trace_snapshot() {
+        let ctx = ExecutionContext::new();
+        ctx.emit(WorkflowEvent::StepStart {
+            step_name: "MyStep".to_string(),
+            input_type: "String".to_string(),
+        });
+        ctx.emit(WorkflowEvent::StepEnd {
+            step_name: "MyStep".to_string(),
+            duration_ms: 42,
+        });
+
+        let traces = ctx.trace_snapshot();
+        assert_eq!(traces.len(), 2);
+    }
+
+    #[test]
+    fn test_emit_artifact() {
+        let ctx = ExecutionContext::new();
+        ctx.emit_artifact("step1", "output", &42u32);
+        let traces = ctx.trace_snapshot();
+        assert_eq!(traces.len(), 1);
+    }
+
+    #[test]
+    fn test_clear_traces() {
+        let ctx = ExecutionContext::new();
+        ctx.emit(WorkflowEvent::StepStart {
+            step_name: "Step".to_string(),
+            input_type: "i32".to_string(),
+        });
+        assert_eq!(ctx.trace_snapshot().len(), 1);
+        ctx.clear_traces();
+        assert!(ctx.trace_snapshot().is_empty());
+    }
+
+    #[test]
+    fn test_context_clone_shares_state() {
+        let ctx1 = ExecutionContext::new();
+        let ctx2 = ctx1.clone();
+
+        ctx1.record_prompt_tokens(50);
+
+        // clone shares the Arc, so ctx2 sees ctx1's changes
+        let snap = ctx2.snapshot();
+        assert_eq!(snap.prompt_token_count, 50);
+    }
+
+    #[test]
+    fn test_default_is_same_as_new() {
+        let ctx = ExecutionContext::default();
+        let snap = ctx.snapshot();
+        assert_eq!(snap.steps_completed, 0);
+    }
+}
