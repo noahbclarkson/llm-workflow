@@ -70,3 +70,52 @@ where
         Ok((a, b))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{LambdaStep, ExecutionContext, Error};
+
+    fn ctx() -> ExecutionContext {
+        ExecutionContext::default()
+    }
+
+    #[tokio::test]
+    async fn test_chain_step_passes_output_to_next() {
+        let a = LambdaStep::new(|x: i32| async move { Ok(x + 10) });
+        let b = LambdaStep::new(|x: i32| async move { Ok(x * 2) });
+        let chain = ChainStep::new(a, b);
+        let result = chain.run(&ctx(), 5).await.unwrap();
+        assert_eq!(result, 30, "(5 + 10) * 2 = 30");
+    }
+
+    #[tokio::test]
+    async fn test_chain_step_propagates_error_from_first() {
+        let a = LambdaStep::new(|_x: i32| async move {
+            Err::<i32, _>(Error::Execution("first failed".to_string()))
+        });
+        let b = LambdaStep::new(|x: i32| async move { Ok(x) });
+        let chain = ChainStep::new(a, b);
+        assert!(chain.run(&ctx(), 5).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_chain_step_propagates_error_from_second() {
+        let a = LambdaStep::new(|x: i32| async move { Ok(x) });
+        let b = LambdaStep::new(|_x: i32| async move {
+            Err::<i32, _>(Error::Execution("second failed".to_string()))
+        });
+        let chain = ChainStep::new(a, b);
+        assert!(chain.run(&ctx(), 5).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_chain_tuple_step_runs_both() {
+        let a = LambdaStep::new(|x: i32| async move { Ok(x + 1) });
+        let b = LambdaStep::new(|x: i32| async move { Ok(x * 2) });
+        let pair = ChainTupleStep::new(a, b);
+        let (left, right) = pair.run(&ctx(), 5).await.unwrap();
+        assert_eq!(left, 6, "a: 5 + 1 = 6");
+        assert_eq!(right, 10, "b: 5 * 2 = 10");
+    }
+}

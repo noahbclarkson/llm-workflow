@@ -36,3 +36,39 @@ where
         Ok((self.f)(output))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{LambdaStep, ExecutionContext};
+
+    fn ctx() -> ExecutionContext {
+        ExecutionContext::default()
+    }
+
+    #[tokio::test]
+    async fn test_map_step_transforms_output() {
+        let inner = LambdaStep::new(|x: i32| async move { Ok(x + 1) });
+        let mapped = MapStep::new(inner, |v: i32| v.to_string());
+        let result = mapped.run(&ctx(), 5).await.unwrap();
+        assert_eq!(result, "6");
+    }
+
+    #[tokio::test]
+    async fn test_map_step_with_identity() {
+        let inner = LambdaStep::new(|x: i32| async move { Ok(x * 3) });
+        let mapped = MapStep::new(inner, |v: i32| v);
+        let result = mapped.run(&ctx(), 4).await.unwrap();
+        assert_eq!(result, 12);
+    }
+
+    #[tokio::test]
+    async fn test_map_step_propagates_inner_error() {
+        use crate::Error;
+        let inner = LambdaStep::new(|_x: i32| async move {
+            Err::<i32, _>(Error::Execution("inner err".to_string()))
+        });
+        let mapped = MapStep::new(inner, |v: i32| v * 2);
+        assert!(mapped.run(&ctx(), 5).await.is_err());
+    }
+}

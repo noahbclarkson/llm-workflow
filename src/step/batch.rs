@@ -84,3 +84,66 @@ where
         Ok(all_outputs)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{LambdaStep, ExecutionContext, Error};
+
+    fn ctx() -> ExecutionContext {
+        ExecutionContext::default()
+    }
+
+    #[tokio::test]
+    async fn test_single_item_adapter_processes_each() {
+        let step = LambdaStep::new(|x: i32| async move { Ok(x * 2) });
+        let adapter = SingleItemAdapter::new(step);
+        let result = adapter.run(&ctx(), vec![1, 2, 3, 4]).await.unwrap();
+        assert_eq!(result, vec![2, 4, 6, 8]);
+    }
+
+    #[tokio::test]
+    async fn test_single_item_adapter_empty_input() {
+        let step = LambdaStep::new(|x: i32| async move { Ok(x) });
+        let adapter = SingleItemAdapter::new(step);
+        let result = adapter.run(&ctx(), vec![]).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_batch_step_processes_in_chunks() {
+        // Inner step receives chunks and doubles each element
+        let inner = LambdaStep::new(|v: Vec<i32>| async move {
+            Ok(v.into_iter().map(|x| x * 2).collect::<Vec<_>>())
+        });
+        let batch = BatchStep::new(inner, 2);
+        let result = batch.run(&ctx(), vec![1, 2, 3, 4, 5]).await.unwrap();
+        assert_eq!(result, vec![2, 4, 6, 8, 10]);
+    }
+
+    #[tokio::test]
+    async fn test_batch_step_single_batch() {
+        let inner = LambdaStep::new(|v: Vec<i32>| async move {
+            Ok(v.into_iter().map(|x| x + 1).collect::<Vec<_>>())
+        });
+        let batch = BatchStep::new(inner, 10);
+        let result = batch.run(&ctx(), vec![1, 2, 3]).await.unwrap();
+        assert_eq!(result, vec![2, 3, 4]);
+    }
+
+    #[test]
+    #[should_panic(expected = "batch_size must be greater than zero")]
+    fn test_batch_step_panics_on_zero_size() {
+        let step = LambdaStep::new(|v: Vec<i32>| async move { Ok(v) });
+        let _ = BatchStep::new(step, 0);
+    }
+
+    #[tokio::test]
+    async fn test_batch_step_propagates_error() {
+        let inner = LambdaStep::new(|_v: Vec<i32>| async move {
+            Err::<Vec<i32>, _>(Error::Execution("batch err".to_string()))
+        });
+        let batch = BatchStep::new(inner, 2);
+        assert!(batch.run(&ctx(), vec![1, 2, 3]).await.is_err());
+    }
+}
